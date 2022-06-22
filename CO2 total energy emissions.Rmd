@@ -1,0 +1,317 @@
+---
+title: "Total energy transportation sector co2 emissions Time series Analysis"
+author: "Arinze Francis"
+date: '2022-06-20'
+output: html_document
+---
+
+```{r}
+rm(list=ls())
+options(scipen=999,digits=4)
+rm
+
+```
+
+# Load R packages
+
+```{r,message=FALSE, echo=FALSE}
+library(readxl)
+library(tidyquant)
+library(tidyverse)
+library(lubridate)
+library(xts)
+library(quantmod)
+library(tseries)
+library(zoo)
+library(ggplot2)
+library(fpp2)
+library(data.table)
+library(forecast)
+```
+
+
+# Dataset loading
+
+```{r,message=FALSE, echo=FALSE}
+
+data <- read_xlsx("Env CO2 Emission.xlsx", sheet = 2)
+head(data)
+tail(data)
+
+any(is.na(data))
+
+
+# Plotting the original dataset
+plot(data$`CO2 Emission`, xlab="year", type ="l", col="palegreen4", main="Total energy transportation sector co2 emissions and year")
+
+
+```
+
+
+# Converting to time series class and plotting the time series data
+
+```{r}
+
+data_ts <- ts(data$`CO2 Emission`, start=c(1973,1),  frequency = 12)
+head(data_ts)
+
+# Plotting time series dataset
+plot(data_ts, xlab="years", ylab="co2 emissions", main="Total energy transportation sector co2 emissions vs Years",col="red",type = "l", lwd=2)
+
+# Observation of the plot:
+# 1. Values of the data are stored in correct order and no missing data.
+# 2. There is an upward trend in the earlier years but falling in the later years. On the average, co2 emissions is going up. 
+# 3. Intra-year stable fluctuations are indicative of seasonal components. As trend increases, fluctuations are also increasing. Indicative of multiplicative seasonality.
+# 4. Co2 emissions is beginining to fall slightly in the later years.
+
+
+
+
+```
+
+
+# to get the seasonality better
+
+```{r}
+ggseasonplot(data_ts, year.labels = T, year.labels.left = T) +ylab("degree") +ggtitle("Seasonal Plot: Total energy transportation sector co2 emissions vs Years")
+
+# Observation:
+# 1) as the year goes by, co2 emissions increases - indicating trend.
+# 2) It is beginning to fall slightly
+
+ggseasonplot(data_ts, polar = T) +ylab("degree") +ggtitle("Polar plot: Total energy transportation sector co2 emissions vs Years")
+
+monthplot(data_ts)
+# Average co2 emissions was a little bit higher in the month of August, July and December. All months showed some irregularities (the bump) but it was most pronounced in the month of February and December.
+
+# Average co2 emissions was a little bit lower in the month of February.
+
+```
+
+
+# Decomposition of plot: Mutiplicative Seasonal correction/adjustment
+
+```{r}
+
+data_decompose <- decompose(data_ts, type = "multiplicative")
+head(data_decompose)
+
+# On the seasonal part in January for all years, CO2 emissions will be 97% of your annual trend (and 3% less) and etc. In August, CO2 emissions will be about 4% more, in December, 2.7% more.
+
+# On the random part: January, 1974, CO2 emissions was about 4% left than where it should be after accounting for trend and seasonality. August, 1974; CO2 emissions was about 1.5% more than the trend and seasonality forecast.
+
+plot(data_decompose)
+
+# the trend is increasing though there is a flattening in 1981, 2001, 1991  and slighlty down in 2012.
+# The seasonal part is repeating.
+# On random: My unpredictable error is about 6% (0.94). In the future, i don't know what the number will be, but my best guess is in the middle (1).
+
+
+
+```
+
+# Splittig data into training and test sets and test the last 2 years
+
+```{r}
+
+data_train <- window(data_ts, start=c(1973,1),end=c(2011,12), freq=12)
+head(data_train)
+
+data_test <- window(data_ts, start=c(2012,1), freq=12)
+head(data_test)
+
+autoplot(data_train, series = "Train") + autolayer(data_test, series = "Test") + ggtitle("Total energy transportation sector co2 emissions train and test set") +xlab("year") +ylab("co2 emissions")+guides(colour=guide_legend(title = "Forecast"))
+
+
+```
+
+#  Data Forcast using Seasonal Naive Method
+
+```{r}
+
+data_naive <- snaive(data_ts, level = c(95), h = 12*12)
+head(data_naive)
+
+print(summary(data_naive))
+#Residual sd: 4.5712 
+
+checkresiduals(data_naive)
+
+
+```
+
+
+# Data forecasting methods using Holt's Winter
+
+```{r}
+data_hw <- hw(data_ts, level = c(95), h=144)  #seasonal = "multiplicative"
+head(data_hw)
+
+print(summary(data_hw))
+# std deviation: 0.0216/ 2.858
+
+checkresiduals(data_hw)
+
+
+```
+
+
+# Data Forecasting Using ARIMA methods
+
+# To check for stationarity
+
+
+```{r}
+
+acf(data_ts)
+# it is not stationary (auto correlation because the spikes cross above the blue lines)
+
+pacf(data_ts)
+
+# it is not stationary (partial-auto correlation because the spikes cross above the blue lines)
+
+
+adf.test(data_ts)
+# p-value = 0.05
+
+# Converting non-stationary data to stationary data
+
+new_arima <- auto.arima(data_ts, d=1, D=1,stepwise = F, approximation = F, trace = T)
+head(new_arima)
+
+
+# To check if the new model is stationary
+pacf(new_arima$residuals)
+
+acf(new_arima$residuals)
+# All okay
+
+
+adf.test(new_arima$residuals)
+# the P-value is lower than 0.05
+
+
+```
+
+# Total energy transportation sector co2 emissions forecasting
+
+```{r}
+
+data_forecast <- forecast(new_arima, level = c(95), h=12*12)
+head(data_forecast)
+
+# Interpretation: July, 2013: The point forecast is 157.7. the Lo 95 and high 95 is the confidence level, if it is low, it will be 152.37, if high, it  will be 163. It is safe to go with the minimum.
+
+
+plot(data_forecast, main = "Total energy transportation sector co2 emissions for the next 12 years", col="red")
+
+```
+
+# Validation of the model
+
+```{r}
+
+Box.test(data_forecast$residuals, lag =23, type = "Ljung-Box")
+# Interpretation: For the Box-Ljung test, p value is less than 0.5
+
+
+print(summary(data_forecast))
+# std. deviation:2.72 
+
+checkresiduals(data_forecast)
+
+
+
+```
+
+
+# Plotting real vs  Fitted Values
+
+```{r}
+ts.plot(new_arima$x, new_arima$fitted, col=1:2, gpars = list(xlab = "Years", ylab="Total energy transportation sector co2 emissions", main= "Real vs Fitted Values"))
+
+
+```
+
+
+# Recommendation and Conclusion:
+
+Total energy transportation sector co2 emissions will keep growing downward slightly (a trend) and it also captures the seasonality. ARIMA model fits the best according to our end sample statistics (standard deviation: 2.72) compared to Holt's winter's model of std. deviation; 2.85 and Seasonal naive model of std. deviation: 4.57 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
